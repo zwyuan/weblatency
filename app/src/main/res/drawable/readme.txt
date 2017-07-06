@@ -1,0 +1,1 @@
+This directory contains icons downloaded from <a href="https://icons8.com/icon/47980/Restart">Restart icon credits</a>. I do not own copyrights of these icons and they are not allowed to be reproduced for commercial use.
