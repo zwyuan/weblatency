@@ -1,6 +1,7 @@
 package net.mobileinsight.milabreceiver;
 
 import android.app.Service;
+import android.os.Environment;
 import android.os.IBinder;
 import android.os.Process;
 import android.os.RemoteException;
@@ -18,7 +19,14 @@ import net.mobileinsight.milab.ITask;
 
 public class MainService extends Service {
 
-    private final String MiLogPath = "/sdcard/imc";
+    private final String LOG_TAG = "WebLatencyExp";
+    private final String taskName = "WebLatencyExp";
+    private final String taskDescription = "Collect LTE latency in accessing a webpage";
+    private final String pluginName = "NetLoggerLatency";
+    private final String relativeLogPath = "imc";
+    //    private final String logFileName = "res.txt";
+    private final String absoluteLogPath = Environment.getExternalStorageDirectory()
+            .getAbsolutePath() + "/" + relativeLogPath;
 
     @Override
     public void onCreate() {
@@ -27,13 +35,13 @@ public class MainService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        Log.i("MILabCallSender", "onStartCommand");
+        Log.i(LOG_TAG, "onStartCommand");
         return START_STICKY;
     }
 
     @Override
     public IBinder onBind(Intent intent) {
-        Log.i("MILabCallSender", "onBind");
+        Log.i(LOG_TAG, "onBind");
         Intent dialogIntent = new Intent(this, MainActivity.class);
         dialogIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         startActivity(dialogIntent);
@@ -42,7 +50,7 @@ public class MainService extends Service {
 
     @Override
     public void onDestroy() {
-        Log.i("MILabTask", "onDestroy()");
+        Log.i(LOG_TAG, "onDestroy()");
         android.os.Process.killProcess(android.os.Process.myPid());
     }
 
@@ -55,23 +63,23 @@ public class MainService extends Service {
         @Override
         public TaskObject getOutput() throws RemoteException {
             TaskObject toSend = new TaskObject();
-            toSend.setTaskName("Call Sender");
-            toSend.setTaskDescription("A call sender");
-            toSend.setPathOutputFolder(MiLogPath);
-            toSend.setPluginNameMI("NetLoggerCFG");
+            toSend.setTaskName(taskName);
+            toSend.setTaskDescription(taskDescription);
+            toSend.setPathOutputFolder(absoluteLogPath);
+            toSend.setPluginNameMI(pluginName);
             return toSend;
         }
 
         @Override
         public void exit() throws RemoteException {
-            Log.i("MainService", "exit");
+            Log.i(LOG_TAG, "exit");
             stopSelf();
         }
 
         @Override
         public void basicTypes(
-                int anInt, long aLong, boolean aBoolean,
-                float aFloat, double aDouble,String aString) throws RemoteException {
+            int anInt, long aLong, boolean aBoolean,
+            float aFloat, double aDouble,String aString) throws RemoteException {
 
         }
     };

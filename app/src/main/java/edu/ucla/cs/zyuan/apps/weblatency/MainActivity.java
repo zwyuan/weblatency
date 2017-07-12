@@ -1,15 +1,19 @@
 package edu.ucla.cs.zyuan.apps.weblatency;
 
-import android.annotation.TargetApi;
+import android.Manifest;
 import android.app.Activity;
 import android.content.Context;
-import android.os.Build;
+import android.content.pm.PackageManager;
+import android.net.wifi.WifiManager;
 import android.os.Bundle;
 import android.os.Environment;
 import android.support.design.widget.FloatingActionButton;
 import android.support.design.widget.Snackbar;
+import android.support.v4.app.ActivityCompat;
+import android.support.v4.content.ContextCompat;
 import android.support.v7.app.AppCompatActivity;
 import android.support.v7.widget.Toolbar;
+import android.telephony.TelephonyManager;
 import android.util.Log;
 import android.view.Menu;
 import android.view.MenuItem;
@@ -28,15 +32,18 @@ import org.json.JSONObject;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
-import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.Locale;
+import java.util.Timer;
+import java.util.TimerTask;
 
 public class MainActivity extends AppCompatActivity {
 
     private final String LOG_TAG = "WebLatency";
     private final String logPath = "imc";
     private final String logFileName = "res.txt";
+
+    private final int MY_PERMISSIONS_WRITE_EXTERNAL_STORAGE = 337;
 
 
     private final String logFilePath = Environment.getExternalStorageDirectory()
@@ -48,9 +55,15 @@ public class MainActivity extends AppCompatActivity {
     private WebView mWebView;
     private TextView latencyTextView;
 
+    private Timer mTimer;
+    private TelephonyManager mTelephonyManager;
+    private WifiManager mWifiManager;
+
     private JSONObject timings;
 
     private String jsData = "";
+    private String carrierName = "";
+    private int dataNetworkType = 0;
     private int navigationStart = 0;
     private int unloadEventStart = 0;
     private int unloadEventEnd = 0;
@@ -94,6 +107,41 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
+        // Here, thisActivity is the current activity
+        if (ContextCompat.checkSelfPermission(this,
+                Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                != PackageManager.PERMISSION_GRANTED) {
+
+            // Should we show an explanation?
+            if (ActivityCompat.shouldShowRequestPermissionRationale(this,
+                    Manifest.permission.WRITE_EXTERNAL_STORAGE)) {
+
+                // Show an explanation to the user *asynchronously* -- don't block
+                // this thread waiting for the user's response! After the user
+                // sees the explanation, try again to request the permission.
+
+            } else {
+
+                // No explanation needed, we can request the permission.
+
+                ActivityCompat.requestPermissions(this,
+                        new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE},
+                        MY_PERMISSIONS_WRITE_EXTERNAL_STORAGE);
+
+                // MY_PERMISSIONS_REQUEST_READ_CONTACTS is an
+                // app-defined int constant. The callback method gets the
+                // result of the request.
+            }
+        }
+
+        mWifiManager = (WifiManager) this.getApplicationContext().getSystemService(Context.WIFI_SERVICE);
+        mWifiManager.setWifiEnabled(false);
+        mTelephonyManager = (TelephonyManager) this.getApplicationContext().getSystemService(Context.TELEPHONY_SERVICE);
+        String carrierName = mTelephonyManager.getNetworkOperatorName();
+
+//        @TargetApi(24)
+//        int dataNetworkType = mTelephonyManager.getDataNetworkType();
+
         if (!isExternalStorageWritable() || !isExternalStorageReadable()) {
             Log.w(LOG_TAG, "External storage is not R/W!");
         }
@@ -114,10 +162,47 @@ public class MainActivity extends AppCompatActivity {
 
         });
 
-        mWebView.loadUrl("https://www.google.com");
+        mTimer = new Timer();
+        mTimer.schedule(new TimerTask() {
+            @Override
+            public void run() {
+                TimerMethod();
+            }
+
+        }, 0, 30000);
+
+
+//        mWebView.loadUrl("https://www.google.com");
+        mWebView.loadUrl("http://web.cs.ucla.edu/~zyuan/test.html");
         getDataFromJs("JSON.stringify(window.performance.timing)", mWebView);
 
     }
+
+    private void TimerMethod()
+    {
+        //This method is called directly by the timer
+        //and runs in the same thread as the timer.
+
+        //We call the method that will work with the UI
+        //through the runOnUiThread method.
+        this.runOnUiThread(Timer_Tick);
+    }
+
+
+    private Runnable Timer_Tick = new Runnable() {
+        public void run() {
+
+            //This method runs in the same thread as the UI.
+
+            //Do something to the UI thread here
+            mWebView.reload();
+            jsData = "";
+            getDataFromJs("JSON.stringify(window.performance.timing)", mWebView);
+//            Snackbar.make((View) findViewById(R.id.activity_main), "Page successfully refreshed", Snackbar.LENGTH_LONG)
+//                    .setAction("Action", null).show();
+
+        }
+    };
 
 
     private void parseJsData(String jsString) {
@@ -160,6 +245,7 @@ public class MainActivity extends AppCompatActivity {
 
     private void calculateLatencies() {
         StringBuilder latency = new StringBuilder();
+        latency.append(String.format(Locale.US, "**["+ mTelephonyManager.getNetworkOperatorName() + "], "));
         latency.append(String.format(Locale.US, "pageLoadTime: %d, ", (loadEventStart - navigationStart)));
         latency.append(String.format(Locale.US, "pageRequestTime: %d, ", (loadEventStart - fetchStart)));
         latency.append(String.format(Locale.US, "dnsTime: %d, ", (domainLookupEnd - domainLookupStart)));
@@ -167,7 +253,7 @@ public class MainActivity extends AppCompatActivity {
         latency.append(String.format(Locale.US, "httpRequestLatency: %d, ", (responseStart - requestStart)));
         latency.append(String.format(Locale.US, "httpConnTime: %d, ", (responseEnd - requestStart)));
         latency.append(String.format(Locale.US, "networkTime: %d, ", (responseEnd - domainLookupStart)));
-        latency.append(String.format(Locale.US, "renderingTime: %d, ", (domComplete - domLoading)));
+        latency.append(String.format(Locale.US, "renderingTime: %d ", (domComplete - domLoading)));
 
         latencyTextView.setText(latency.toString().replaceAll(", ", "ms,\n"));
         writeExternalStorageFile(logFile, latency.toString());
