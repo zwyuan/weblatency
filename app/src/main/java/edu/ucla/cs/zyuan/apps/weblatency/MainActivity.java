@@ -41,14 +41,14 @@ public class MainActivity extends AppCompatActivity {
 
     private final String LOG_TAG = "WebLatency";
     private final String logPath = "imc";
-    private final String logFileName = "res.txt";
+    private final String logFileNameBase = "web_latency_";
 
     private final int MY_PERMISSIONS_WRITE_EXTERNAL_STORAGE = 337;
 
 
     private final String logFilePath = Environment.getExternalStorageDirectory()
             .getAbsolutePath() + "/" + logPath;
-    private final File logFile = new File(logFilePath + "/" + logFileName);
+    private File logFile = new File(logFilePath, logFileNameBase + getTimestamp() + ".txt");
 
     private OutputStream os;
 
@@ -162,6 +162,9 @@ public class MainActivity extends AppCompatActivity {
 
         });
 
+//        mWebView.loadUrl("https://www.google.com");
+        mWebView.loadUrl("http://web.cs.ucla.edu/~zyuan/test.html");
+
         mTimer = new Timer();
         mTimer.schedule(new TimerTask() {
             @Override
@@ -171,11 +174,15 @@ public class MainActivity extends AppCompatActivity {
 
         }, 0, 30000);
 
+//        getDataFromJs("JSON.stringify(window.performance.timing)", mWebView);
+    }
 
-//        mWebView.loadUrl("https://www.google.com");
-        mWebView.loadUrl("http://web.cs.ucla.edu/~zyuan/test.html");
-        getDataFromJs("JSON.stringify(window.performance.timing)", mWebView);
 
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        Log.w(LOG_TAG, "Closing weblatency app, re-enable WiFi");
+        mWifiManager.setWifiEnabled(true);
     }
 
     private void TimerMethod()
@@ -196,6 +203,7 @@ public class MainActivity extends AppCompatActivity {
 
             //Do something to the UI thread here
             mWebView.reload();
+            Log.i(LOG_TAG, "Reloaded web view");
             jsData = "";
             getDataFromJs("JSON.stringify(window.performance.timing)", mWebView);
 //            Snackbar.make((View) findViewById(R.id.activity_main), "Page successfully refreshed", Snackbar.LENGTH_LONG)
@@ -204,6 +212,9 @@ public class MainActivity extends AppCompatActivity {
         }
     };
 
+    private String getTimestamp() {
+        return ((Long) (System.currentTimeMillis() / 1000)).toString();
+    }
 
     private void parseJsData(String jsString) {
         try{

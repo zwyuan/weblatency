@@ -1,6 +1,8 @@
 package net.mobileinsight.milabreceiver;
 
 import android.app.Service;
+import android.content.Context;
+import android.net.wifi.WifiManager;
 import android.os.Environment;
 import android.os.IBinder;
 import android.os.Process;
@@ -51,6 +53,9 @@ public class MainService extends Service {
     @Override
     public void onDestroy() {
         Log.i(LOG_TAG, "onDestroy()");
+        Log.w(LOG_TAG, "Closing weblatency app, re-enable WiFi");
+        WifiManager mWifiManager = (WifiManager) this.getApplicationContext().getSystemService(Context.WIFI_SERVICE);
+        mWifiManager.setWifiEnabled(true);
         android.os.Process.killProcess(android.os.Process.myPid());
     }
 
