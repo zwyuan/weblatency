@@ -14,6 +14,7 @@ import android.support.v4.content.ContextCompat;
 import android.support.v7.app.AppCompatActivity;
 import android.support.v7.widget.Toolbar;
 import android.telephony.TelephonyManager;
+import android.text.format.DateFormat;
 import android.util.Log;
 import android.view.Menu;
 import android.view.MenuItem;
@@ -23,8 +24,11 @@ import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.widget.Button;
+import android.widget.CompoundButton;
 import android.widget.TextView;
 import android.widget.Toast;
+import android.widget.ToggleButton;
 
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -33,6 +37,8 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
+import java.text.SimpleDateFormat;
+import java.util.Date;
 import java.util.Locale;
 import java.util.Timer;
 import java.util.TimerTask;
@@ -48,12 +54,17 @@ public class MainActivity extends AppCompatActivity {
 
     private final String logFilePath = Environment.getExternalStorageDirectory()
             .getAbsolutePath() + "/" + logPath;
-    private File logFile = new File(logFilePath, logFileNameBase + getTimestamp() + ".txt");
+//    Date date = new Date(location.getTime());
+//    DateFormat dateFormat = android.text.format.DateFormat.getDateFormat(getApplicationContext());
+//    String a = DateFormat.format("yyyy-MM-dd hh:mm:ss", new java.util.Date());
+
+    private File logFile = null;
 
     private OutputStream os;
 
     private WebView mWebView;
     private TextView latencyTextView;
+    private boolean mAutoReload = true;
 
     private Timer mTimer;
     private TelephonyManager mTelephonyManager;
@@ -93,6 +104,12 @@ public class MainActivity extends AppCompatActivity {
         setContentView(R.layout.activity_main);
         Toolbar toolbar = (Toolbar) findViewById(R.id.toolbar);
         setSupportActionBar(toolbar);
+
+        mWifiManager = (WifiManager) this.getApplicationContext().getSystemService(Context.WIFI_SERVICE);
+        mWifiManager.setWifiEnabled(false);
+        mTelephonyManager = (TelephonyManager) this.getApplicationContext().getSystemService(Context.TELEPHONY_SERVICE);
+
+        logFile = new File(logFilePath, logFileNameBase + getLogMetadata() + ".txt");
 
         FloatingActionButton fab = (FloatingActionButton) findViewById(R.id.fab);
         fab.setOnClickListener(new View.OnClickListener() {
@@ -134,11 +151,6 @@ public class MainActivity extends AppCompatActivity {
             }
         }
 
-        mWifiManager = (WifiManager) this.getApplicationContext().getSystemService(Context.WIFI_SERVICE);
-        mWifiManager.setWifiEnabled(false);
-        mTelephonyManager = (TelephonyManager) this.getApplicationContext().getSystemService(Context.TELEPHONY_SERVICE);
-        String carrierName = mTelephonyManager.getNetworkOperatorName();
-
 //        @TargetApi(24)
 //        int dataNetworkType = mTelephonyManager.getDataNetworkType();
 
@@ -165,15 +177,52 @@ public class MainActivity extends AppCompatActivity {
 //        mWebView.loadUrl("https://www.google.com");
         mWebView.loadUrl("http://web.cs.ucla.edu/~zyuan/test.html");
 
+        mTimer = null;
+
+        ToggleButton auto_toggle_button = (ToggleButton) findViewById(R.id.auto_toggle_button);
+        auto_toggle_button.setTextOff("Auto Mode OFF");
+        auto_toggle_button.setTextOn("Auto Mode ON");
+        auto_toggle_button.setChecked(true);
+
+        Log.i(LOG_TAG, "Initializing toggle button");
         mTimer = new Timer();
         mTimer.schedule(new TimerTask() {
             @Override
             public void run() {
                 TimerMethod();
             }
-
         }, 0, 30000);
 
+        auto_toggle_button.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
+            public void onCheckedChanged(CompoundButton buttonView, boolean isChecked) {
+                if (isChecked) {
+                    // The toggle is enabled
+                    Log.i(LOG_TAG, "Toggle button is checked, automatically fetch webpage");
+
+                    if (mTimer != null) {
+                        mTimer.cancel();
+                    }
+                    mAutoReload = true;
+
+                    mTimer = new Timer();
+                    mTimer.schedule(new TimerTask() {
+                        @Override
+                        public void run() {
+                            TimerMethod();
+                        }
+
+                    }, 0, 30000);
+                } else {
+                    // The toggle is disabled
+                    Log.i(LOG_TAG, "Toggle button is not checked, disable automatic refreshing");
+                    mAutoReload = false;
+
+                    if (mTimer != null) {
+                        mTimer.cancel();
+                    }
+                }
+            }
+        });
 //        getDataFromJs("JSON.stringify(window.performance.timing)", mWebView);
     }
 
@@ -192,7 +241,9 @@ public class MainActivity extends AppCompatActivity {
 
         //We call the method that will work with the UI
         //through the runOnUiThread method.
-        this.runOnUiThread(Timer_Tick);
+        if (mAutoReload) {
+            this.runOnUiThread(Timer_Tick);
+        }
     }
 
 
@@ -212,8 +263,13 @@ public class MainActivity extends AppCompatActivity {
         }
     };
 
-    private String getTimestamp() {
-        return ((Long) (System.currentTimeMillis() / 1000)).toString();
+    private String getLogMetadata() {
+        String carrierName = mTelephonyManager.getNetworkOperatorName().replace(" ", "");;
+        String timestamp = ((Long) (System.currentTimeMillis() / 1000)).toString();
+        //String datetime = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(new java.util.Date());
+        String datetime = DateFormat.format("yyyyMMdd_HHmmss", new java.util.Date()).toString();
+        return datetime + "_" + timestamp + "_" + android.os.Build.MANUFACTURER.replace(" ", "")
+                + "-" + android.os.Build.MODEL.replace(" ", "") +"_" + carrierName;
     }
 
     private void parseJsData(String jsString) {

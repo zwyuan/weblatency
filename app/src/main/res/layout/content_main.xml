@@ -10,7 +10,7 @@
 
     <WebView
         android:id="@+id/my_webview"
-        android:layout_width="match_parent"
+        android:layout_width="364dp"
         android:layout_height="360dp"
         android:scrollbars="none" />
 

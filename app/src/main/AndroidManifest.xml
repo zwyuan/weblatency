@@ -3,7 +3,6 @@
     xmlns:tools="http://schemas.android.com/tools"
     package="edu.ucla.cs.zyuan.apps.weblatency">
 
-
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
@@ -29,7 +28,7 @@
         </activity>
 
         <service
-            android:name="net.mobileinsight.milabreceiver.MainService"
+            android:name=".MainService"
             android:exported="true"
             android:label="MILabTask"
             tools:ignore="ExportedService" />
