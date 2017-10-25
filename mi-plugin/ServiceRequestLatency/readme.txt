@@ -1,0 +1,1 @@
+A basic cellular event logger which saves cellular messages to /sdcard/mobileinsight/plugins/SRLatency/log, and save service request latency result to /sdcard/mobileinsight/sr/sr_latency_[timestamp].txt
