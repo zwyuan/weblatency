@@ -3,4 +3,7 @@
     <string name="action_settings">Settings</string>
     <string name="load_latency">Refresh page to get latency</string>
     <string name="toggle_auto">Auto Refresh</string>
+    <string name="defaultUrl">http://web.cs.ucla.edu/~zyuan/test.html</string>
+    <string name="promptName">URL: </string>
+    <string name="goBtnName">GO</string>
 </resources>

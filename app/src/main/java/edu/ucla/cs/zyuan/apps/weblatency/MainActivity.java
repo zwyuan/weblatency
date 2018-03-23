@@ -13,12 +13,19 @@ import android.support.v4.app.ActivityCompat;
 import android.support.v4.content.ContextCompat;
 import android.support.v7.app.AppCompatActivity;
 import android.support.v7.widget.Toolbar;
+import android.telephony.CellInfo;
+import android.telephony.CellInfoGsm;
+import android.telephony.CellInfoLte;
+import android.telephony.PhoneStateListener;
 import android.telephony.TelephonyManager;
+import android.text.Editable;
+import android.text.TextWatcher;
 import android.text.format.DateFormat;
 import android.util.Log;
 import android.view.Menu;
 import android.view.MenuItem;
 import android.view.View;
+import android.webkit.URLUtil;
 import android.webkit.ValueCallback;
 import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
@@ -26,6 +33,7 @@ import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.Button;
 import android.widget.CompoundButton;
+import android.widget.EditText;
 import android.widget.TextView;
 import android.widget.Toast;
 import android.widget.ToggleButton;
@@ -39,6 +47,7 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.text.SimpleDateFormat;
 import java.util.Date;
+import java.util.List;
 import java.util.Locale;
 import java.util.Timer;
 import java.util.TimerTask;
@@ -46,11 +55,15 @@ import java.util.TimerTask;
 public class MainActivity extends AppCompatActivity {
 
     private final String LOG_TAG = "WebLatency";
-    private final String logPath = "imc";
-    private final String logFileNameBase = "web_latency_";
+    private final String logPath = "weblatency";
+    private final String logFileNameBase = "weblog_";
 
+    private final int MY_PERMISSIONS_REQUEST_READ_PHONE_STATE = 338;
     private final int MY_PERMISSIONS_WRITE_EXTERNAL_STORAGE = 337;
 
+    final protected String json_timing_cmd = "JSON.stringify(window.performance.timing)"; // get Performance Timing
+    final protected String json_paint_cmd = "JSON.stringify(window.performance.getEntriesByName('first-contentful-paint'))"; // get First Contentful Painting
+    final private Boolean use_paint_cmd = true;
 
     private final String logFilePath = Environment.getExternalStorageDirectory()
             .getAbsolutePath() + "/" + logPath;
@@ -59,11 +72,13 @@ public class MainActivity extends AppCompatActivity {
 //    String a = DateFormat.format("yyyy-MM-dd hh:mm:ss", new java.util.Date());
 
     private File logFile = null;
-
     private OutputStream os;
 
+    protected String info = "";
+    protected String defaultUrl = "http://web.cs.ucla.edu/~zyuan/test.html";
     private WebView mWebView;
     private TextView latencyTextView;
+    private TextView mCellInfoTextView;
     private boolean mAutoReload = true;
 
     private Timer mTimer;
@@ -72,30 +87,40 @@ public class MainActivity extends AppCompatActivity {
 
     private JSONObject timings;
 
+    private int rc = -1;
+
     private String jsData = "";
     private String carrierName = "";
     private int dataNetworkType = 0;
-    private int navigationStart = 0;
-    private int unloadEventStart = 0;
-    private int unloadEventEnd = 0;
-    private int redirectStart = 0;
-    private int redirectEnd = 0;
-    private int fetchStart = 0;
-    private int domainLookupStart = 0;
-    private int domainLookupEnd = 0;
-    private int connectStart = 0;
-    private int connectEnd = 0;
-    private int secureConnectionStart = 0;
-    private int requestStart = 0;
-    private int responseStart = 0;
-    private int responseEnd = 0;
-    private int domLoading = 0;
-    private int domInteractive = 0;
-    private int domContentLoadedEventStart = 0;
-    private int domContentLoadedEventEnd = 0;
-    private int domComplete = 0;
-    private int loadEventStart = 0;
-    private int loadEventEnd = 0;
+
+    // First Contentful Paintings
+    private String jsonEntryName = "";
+    private String jsonEntryType = "";
+    private double jsonEntryStartTime = -1;
+    private double jsonEntryDuration = -1;
+
+    // Navigation Timing Data
+    private int navigationStart = -1;
+    private int unloadEventStart = -1;
+    private int unloadEventEnd = -1;
+    private int redirectStart = -1;
+    private int redirectEnd = -1;
+    private int fetchStart = -1;
+    private int domainLookupStart = -1;
+    private int domainLookupEnd = -1;
+    private int connectStart = -1;
+    private int connectEnd = -1;
+    private int secureConnectionStart = -1;
+    private int requestStart = -1;
+    private int responseStart = -1;
+    private int responseEnd = -1;
+    private int domLoading = -1;
+    private int domInteractive = -1;
+    private int domContentLoadedEventStart = -1;
+    private int domContentLoadedEventEnd = -1;
+    private int domComplete = -1;
+    private int loadEventStart = -1;
+    private int loadEventEnd = -1;
 
 
     @Override
@@ -111,18 +136,7 @@ public class MainActivity extends AppCompatActivity {
 
         logFile = new File(logFilePath, logFileNameBase + getLogMetadata() + ".txt");
 
-        FloatingActionButton fab = (FloatingActionButton) findViewById(R.id.fab);
-        fab.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View view) {
-                // Handle reload
-                mWebView.reload();
-                jsData = "";
-                getDataFromJs("JSON.stringify(window.performance.timing)", mWebView);
-                Snackbar.make(view, "Page successfully refreshed", Snackbar.LENGTH_LONG)
-                        .setAction("Action", null).show();
-            }
-        });
+        final EditText userUrl = (EditText) findViewById(R.id.url);
 
         // Here, thisActivity is the current activity
         if (ContextCompat.checkSelfPermission(this,
@@ -174,15 +188,50 @@ public class MainActivity extends AppCompatActivity {
 
         });
 
-//        mWebView.loadUrl("https://www.google.com");
-        mWebView.loadUrl("http://web.cs.ucla.edu/~zyuan/test.html");
+//        mWebView.loadUrl(userURL);
+
+        final Button mGoButton = (Button) findViewById(R.id.goBtn);
+        mGoButton.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+//                Log.i(LOG_TAG, "userUrl.getText() is: " + userUrl.getText().toString());
+                String userURL = buildUrlString(userUrl.getText().toString());
+                Log.i(LOG_TAG, "URL I got is: " + userURL);
+
+                if (URLUtil.isHttpUrl(userURL) || URLUtil.isHttpsUrl(userURL)) {
+                    mWebView.loadUrl(userURL);
+                } else {
+                    mWebView.loadUrl(defaultUrl);
+                }
+//                Log.i(LOG_TAG, "URL I got is: " + userURL);
+            }
+        });
+
+        FloatingActionButton fab = (FloatingActionButton) findViewById(R.id.fab);
+        fab.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                // Handle reload
+                mWebView.reload();
+                jsData = "";
+
+                if (use_paint_cmd) {
+                    getDataFromJs(json_paint_cmd, mWebView);
+                } else {
+                    getDataFromJs(json_timing_cmd, mWebView);
+                }
+
+                Snackbar.make(view, "Page successfully refreshed", Snackbar.LENGTH_LONG)
+                        .setAction("Action", null).show();
+            }
+        });
 
         mTimer = null;
 
         ToggleButton auto_toggle_button = (ToggleButton) findViewById(R.id.auto_toggle_button);
-        auto_toggle_button.setTextOff("Auto Mode OFF");
-        auto_toggle_button.setTextOn("Auto Mode ON");
-        auto_toggle_button.setChecked(true);
+        auto_toggle_button.setTextOff("Auto Refresh OFF");
+        auto_toggle_button.setTextOn("Auto Refresh ON");
+        auto_toggle_button.setChecked(false);
 
         Log.i(LOG_TAG, "Initializing toggle button");
         mTimer = new Timer();
@@ -197,7 +246,7 @@ public class MainActivity extends AppCompatActivity {
             public void onCheckedChanged(CompoundButton buttonView, boolean isChecked) {
                 if (isChecked) {
                     // The toggle is enabled
-                    Log.i(LOG_TAG, "Toggle button is checked, automatically fetch webpage");
+                    Log.i(LOG_TAG, "Toggle button is checked, automatically refresh web page");
 
                     if (mTimer != null) {
                         mTimer.cancel();
@@ -246,22 +295,67 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+    public String buildUrlString(String url) {
+        if (url.isEmpty()) {
+            return defaultUrl;
+        } else {
+            if (!url.startsWith("www.") && !url.startsWith("http://") && !url.startsWith("https://")){
+                url = "www." + url;
+            }
+            if (!url.startsWith("http://") && !url.startsWith("https://")){
+                url = "http://" + url;
+            }
+        }
+        return url;
+    }
 
     private Runnable Timer_Tick = new Runnable() {
         public void run() {
-
             //This method runs in the same thread as the UI.
 
             //Do something to the UI thread here
             mWebView.reload();
             Log.i(LOG_TAG, "Reloaded web view");
             jsData = "";
-            getDataFromJs("JSON.stringify(window.performance.timing)", mWebView);
+
+            if (use_paint_cmd) {
+                getDataFromJs(json_paint_cmd, mWebView);
+            } else {
+                getDataFromJs(json_timing_cmd, mWebView);
+            }
 //            Snackbar.make((View) findViewById(R.id.activity_main), "Page successfully refreshed", Snackbar.LENGTH_LONG)
 //                    .setAction("Action", null).show();
 
         }
     };
+
+    private void getDataFromJs(String command, WebView webView) {
+        // build anonymous function to execute javascript
+        String js = String.format("(function() { return %s })();", command);
+
+        webView.evaluateJavascript(js, new ValueCallback<String>() {
+            @Override
+            public void onReceiveValue(String s) {
+                jsData = s.replaceAll("^\"|\"$", "");
+                jsData = jsData.replaceAll("\\\\", "");
+
+                Log.d(LOG_TAG, "evaluateJavascript(), jsData = " + jsData.toString());
+
+                if (use_paint_cmd) {
+                    parseJsPaintTimingData(jsData);
+                } else {
+                    parseJsPerformanceTimingData(jsData);
+                }
+
+                if (!hasExternalStorageFile(logFile)) {
+                    Log.w(LOG_TAG, "Creating " + logFile.toString());
+                    createExternalStorageFile(logFilePath);
+                }
+
+                writeExternalStorageFile(logFile, jsData);
+            }
+        });
+    }
 
     private String getLogMetadata() {
         String carrierName = mTelephonyManager.getNetworkOperatorName().replace(" ", "");;
@@ -272,7 +366,41 @@ public class MainActivity extends AppCompatActivity {
                 + "-" + android.os.Build.MODEL.replace(" ", "") +"_" + carrierName;
     }
 
-    private void parseJsData(String jsString) {
+    private void parseJsPaintTimingData(String jsString) {
+
+        jsString = jsString.replaceAll("\\[", "").replaceAll("\\]","");
+        Log.d(LOG_TAG, "parseJsPaintTimingData(), jsString = " + jsString);
+
+        try{
+            timings = new JSONObject(jsString);
+        } catch (Exception e) {
+            Log.w(LOG_TAG, "Wrong parsing JSON painting data: " + jsString);
+        }
+
+        if (timings != null) {
+            try {
+                jsonEntryName = timings.getString("name");
+                jsonEntryType = timings.getString("entryType");
+                jsonEntryStartTime = timings.getInt("startTime");
+                jsonEntryDuration = timings.getInt("duration");
+
+                StringBuilder latency = new StringBuilder();
+                latency.append(String.format(Locale.US, "**["+ mTelephonyManager.getNetworkOperatorName().replaceAll("\\s","") + "], "));
+                latency.append(String.format(Locale.US, "jsonEntryName: %s, ", jsonEntryName));
+                latency.append(String.format(Locale.US, "entryType: %s, ", jsonEntryType));
+                latency.append(String.format(Locale.US, "startTime: %.2f, ", jsonEntryStartTime));
+                latency.append(String.format(Locale.US, "duration: %.2f ", jsonEntryDuration));
+
+                latencyTextView.setText(latency.toString().replaceAll(", ", ",\n"));
+                writeExternalStorageFile(logFile, latency.toString());
+            } catch (JSONException e) {
+                Log.w(LOG_TAG, "Exception in parsing json object" + e);
+            }
+        }
+    }
+
+    private void parseJsPerformanceTimingData(String jsString) {
+        Log.i(LOG_TAG, "parseJsPerformanceTimingData Received data: " + jsString);
         try{
             timings = new JSONObject(jsString);
         } catch (Exception e) {
@@ -326,26 +454,83 @@ public class MainActivity extends AppCompatActivity {
         writeExternalStorageFile(logFile, latency.toString());
     }
 
-
-    private void getDataFromJs(String command, WebView webView) {
-        // build anonymous function to execute javascript
-        String js = String.format("(function() { return %s })();", command);
-
-        webView.evaluateJavascript(js, new ValueCallback<String>() {
-            @Override
-            public void onReceiveValue(String s) {
-                jsData = s.replaceAll("^\"|\"$", "");
-                jsData = jsData.replaceAll("\\\\", "");
-                parseJsData(jsData);
-
-                if (!hasExternalStorageFile(logFile)) {
-                    Log.w(LOG_TAG, "Creating " + logFile.toString());
-                    createExternalStorageFile(logFilePath);
+    public int showCellInfoStrings() {
+        try {
+            mTelephonyManager.listen(new PhoneStateListener(){
+                @Override
+                public void onCellInfoChanged(List<CellInfo> cellInfo) {
+                    super.onCellInfoChanged(cellInfo);
+                    for (CellInfo ci : cellInfo) {
+                        if (ci instanceof CellInfoGsm) {
+                            Log.d("TAG", "This has 2G");
+                        } else if (ci instanceof CellInfoLte) {
+                            Log.d("TAG", "This has 4G");
+                        } else {
+                            Log.d("TAG", "This has 3G");
+                        }
+                    }
                 }
 
-                writeExternalStorageFile(logFile, jsData);
+            }, PhoneStateListener.LISTEN_CELL_INFO);
+
+            mCellInfoTextView.setText(info); // displaying the information in the textView
+            return 0;
+        } catch (SecurityException se) {
+            info = "Sorry, don't have the permission to know";
+            mCellInfoTextView.setText(info); // displaying the information in the textView
+            return -1;
+        }
+    }
+
+    public int showPhoneInfoStrings() {
+        try {
+            // Calling the methods of TelephonyManager the returns the information
+            String IMEINumber = mTelephonyManager.getDeviceId();
+            String subscriberID = mTelephonyManager.getDeviceId();
+            String SIMSerialNumber = mTelephonyManager.getSimSerialNumber();
+            String networkCountryISO = mTelephonyManager.getNetworkCountryIso();
+            String SIMCountryISO = mTelephonyManager.getSimCountryIso();
+            String softwareVersion = mTelephonyManager.getDeviceSoftwareVersion();
+            String voiceMailNumber = mTelephonyManager.getVoiceMailNumber();
+
+            // getting information if phone is in roaming
+            boolean isRoaming = mTelephonyManager.isNetworkRoaming();
+
+            // Get the phone type
+            String phoneTypeStr = "";
+
+            int phoneTypeInt = mTelephonyManager.getPhoneType();
+
+            switch (phoneTypeInt) {
+                case (TelephonyManager.PHONE_TYPE_CDMA):
+                    phoneTypeStr = "CDMA";
+                    break;
+                case (TelephonyManager.PHONE_TYPE_GSM):
+                    phoneTypeStr = "GSM";
+                    break;
+                case (TelephonyManager.PHONE_TYPE_NONE):
+                    phoneTypeStr = "NONE";
+                    break;
             }
-        });
+
+            info = "Phone Details:\n";
+            info += "\n IMEI Number: " + IMEINumber;
+            info += "\n SubscriberID: " + subscriberID;
+            info += "\n Sim Serial Number: " + SIMSerialNumber;
+            info += "\n Network Country ISO: " + networkCountryISO;
+            info += "\n SIM Country ISO: " + SIMCountryISO;
+            info += "\n Software Version: " + softwareVersion;
+            info += "\n Voice Mail Number: " + voiceMailNumber;
+            info += "\n Phone Network Type: " + phoneTypeStr;
+            info += "\n In Roaming? : " + isRoaming;
+
+            mCellInfoTextView.setText(info); // displaying the information in the textView
+            return 0;
+        } catch (SecurityException se) {
+            info = "Sorry, don't have the permission to know";
+            mCellInfoTextView.setText(info); // displaying the information in the textView
+            return -1;
+        }
     }
 
     void createExternalStorageFile(String logFilePath) {
