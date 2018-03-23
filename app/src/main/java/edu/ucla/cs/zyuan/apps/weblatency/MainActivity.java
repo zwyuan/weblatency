@@ -7,19 +7,22 @@ import android.content.pm.PackageManager;
 import android.net.wifi.WifiManager;
 import android.os.Bundle;
 import android.os.Environment;
+import android.os.Handler;
 import android.support.design.widget.FloatingActionButton;
 import android.support.design.widget.Snackbar;
 import android.support.v4.app.ActivityCompat;
 import android.support.v4.content.ContextCompat;
 import android.support.v7.app.AppCompatActivity;
 import android.support.v7.widget.Toolbar;
+import android.telephony.CellIdentityGsm;
+import android.telephony.CellIdentityLte;
+import android.telephony.CellIdentityWcdma;
 import android.telephony.CellInfo;
 import android.telephony.CellInfoGsm;
 import android.telephony.CellInfoLte;
+import android.telephony.CellInfoWcdma;
 import android.telephony.PhoneStateListener;
 import android.telephony.TelephonyManager;
-import android.text.Editable;
-import android.text.TextWatcher;
 import android.text.format.DateFormat;
 import android.util.Log;
 import android.view.Menu;
@@ -45,8 +48,6 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
-import java.text.SimpleDateFormat;
-import java.util.Date;
 import java.util.List;
 import java.util.Locale;
 import java.util.Timer;
@@ -85,6 +86,8 @@ public class MainActivity extends AppCompatActivity {
     private TelephonyManager mTelephonyManager;
     private WifiManager mWifiManager;
 
+    String newCell = null;
+    List<CellInfo> curCellInfoList = null;
     private JSONObject timings;
 
     private int rc = -1;
@@ -130,9 +133,27 @@ public class MainActivity extends AppCompatActivity {
         Toolbar toolbar = (Toolbar) findViewById(R.id.toolbar);
         setSupportActionBar(toolbar);
 
+        mCellInfoTextView = (TextView) findViewById(R.id.cellinfo_textview);
+
         mWifiManager = (WifiManager) this.getApplicationContext().getSystemService(Context.WIFI_SERVICE);
         mWifiManager.setWifiEnabled(false);
         mTelephonyManager = (TelephonyManager) this.getApplicationContext().getSystemService(Context.TELEPHONY_SERVICE);
+        mTelephonyManager.listen(new CellStateListener(mCellInfoTextView, curCellInfoList), PhoneStateListener.LISTEN_CELL_INFO // Requires API 17
+                | PhoneStateListener.LISTEN_CELL_LOCATION
+//              | PhoneStateListener.LISTEN_CALL_STATE
+//                | PhoneStateListener.LISTEN_DATA_ACTIVITY
+//                | PhoneStateListener.LISTEN_DATA_CONNECTION_STATE
+//                | PhoneStateListener.LISTEN_SERVICE_STATE
+//                | PhoneStateListener.LISTEN_SIGNAL_STRENGTHS
+//                | PhoneStateListener.LISTEN_CALL_FORWARDING_INDICATOR
+//                | PhoneStateListener.LISTEN_MESSAGE_WAITING_INDICATOR
+        );
+
+        try {
+            curCellInfoList = mTelephonyManager.getAllCellInfo();
+        } catch(SecurityException se) {
+            Log.e(LOG_TAG, "NO permission to check cell info");
+        }
 
         logFile = new File(logFilePath, logFileNameBase + getLogMetadata() + ".txt");
 
@@ -165,12 +186,10 @@ public class MainActivity extends AppCompatActivity {
             }
         }
 
-//        @TargetApi(24)
-//        int dataNetworkType = mTelephonyManager.getDataNetworkType();
-
         if (!isExternalStorageWritable() || !isExternalStorageReadable()) {
             Log.w(LOG_TAG, "External storage is not R/W!");
         }
+
 
         mWebView = (WebView) findViewById(R.id.my_webview);
         mWebView.getSettings().setJavaScriptEnabled(true); // enable javascript
@@ -203,7 +222,12 @@ public class MainActivity extends AppCompatActivity {
                 } else {
                     mWebView.loadUrl(defaultUrl);
                 }
-//                Log.i(LOG_TAG, "URL I got is: " + userURL);
+
+                if (use_paint_cmd) {
+                    getDataFromJs(json_paint_cmd, mWebView);
+                } else {
+                    getDataFromJs(json_timing_cmd, mWebView);
+                }
             }
         });
 
@@ -241,6 +265,15 @@ public class MainActivity extends AppCompatActivity {
                 TimerMethod();
             }
         }, 0, 30000);
+
+        callGetCellIdAsyncTask();
+//        Timer mCheckCellIdTimer = new Timer();
+//        mCheckCellIdTimer.schedule(new TimerTask() {
+//            @Override
+//            public void run() {
+//                MonitorPrimaryCellMethod();
+//            }
+//        }, 0, 100);
 
         auto_toggle_button.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
             public void onCheckedChanged(CompoundButton buttonView, boolean isChecked) {
@@ -294,6 +327,85 @@ public class MainActivity extends AppCompatActivity {
             this.runOnUiThread(Timer_Tick);
         }
     }
+
+    public void callGetCellIdAsyncTask() {
+        final Handler handler = new Handler();
+        Timer timer = new Timer();
+        TimerTask doAsynchronousTask = new TimerTask() {
+            String message = "";
+            String old_message = "";
+
+            @Override
+            public void run() {
+                handler.post(new Runnable() {
+                    public void run() {
+//                        Log.i(LOG_TAG, "Old msg is" + old_message);
+                        try {
+                            CheckCellIdTask checkCellIdTask = new CheckCellIdTask();
+                            // PerformBackgroundTask this class is the class that extends AsyncTask
+                            message = checkCellIdTask.execute(curCellInfoList).get();
+                            if (!message.equals(old_message)) {
+//                                Log.i(LOG_TAG, message);
+                                Log.i(LOG_TAG, "I am resetting mCellInfoTextView with new message: " + message);
+                                mCellInfoTextView.setText(message);
+                            }
+                            old_message = message;
+//                        mCellInfoTextView.setText(message);
+                        } catch (Exception e) {
+                            // TODO Auto-generated catch block
+                        }
+                    }
+                });
+            }
+        };
+        timer.schedule(doAsynchronousTask, 0, 1000); //execute in every 200 ms
+    }
+
+//    private void MonitorPrimaryCellMethod()
+//    {
+//        //This method is called directly by the timer
+//        //and runs in the same thread as the timer.
+//
+//        //We call the method that will work with the UI
+//        //through the runOnUiThread method.
+//        if (true) {
+//            this.runOnUiThread(MonitorPrimaryCellThread);
+//        }
+//    }
+//
+//    private Runnable MonitorPrimaryCellThread = new Runnable() {
+//        public void run() {
+//            //This method runs in the same thread as the UI.
+//            if (curCellInfoList == null) {
+//                Log.i(LOG_TAG, "curCellInfoList = Null");
+//            } else {
+//                Log.i(LOG_TAG, "curCellInfoList =\n" + curCellInfoList);
+//                for (CellInfo c : curCellInfoList) {
+//                    if (c.isRegistered()) {
+//                        if (c instanceof CellInfoGsm) {
+//                            CellIdentityGsm cellIdentityGsm = ((CellInfoGsm) c).getCellIdentity();
+//                            String message = String.format(Locale.US, "Registered Gsm Cell: Cid-Lac = %d-%d", cellIdentityGsm.getCid(), cellIdentityGsm.getLac());
+//                            Log.i(LOG_TAG, message);
+//                            mCellInfoTextView.setText(message);
+//                        } else if (c instanceof CellInfoWcdma){
+//                            CellIdentityWcdma cellIdentityWcdma = ((CellInfoWcdma) c).getCellIdentity();
+//                            String message = String.format(Locale.US, "Registered Wcdma Cell: Cid-Lac = %d-%d", cellIdentityWcdma.getCid(), cellIdentityWcdma.getLac());
+//                            Log.i(LOG_TAG, message);
+//                            mCellInfoTextView.setText(message);
+//                        } else if (c instanceof CellInfoLte) {
+//                            CellIdentityLte cellIdentityLte = ((CellInfoLte) c).getCellIdentity();
+//                            // cast to CellInfoLte and call all the CellInfoLte methods you need
+//                            // Gets the LTE PCI: (returns Physical Cell Id 0..503, Integer.MAX_VALUE if unknown)
+//                            String message = String.format(Locale.US, "Registered LTE Cell: Pci-Tac = %d-%d", cellIdentityLte.getPci(), cellIdentityLte.getTac());
+//                            Log.i(LOG_TAG, message);
+//                            mCellInfoTextView.setText(message);
+//                        }
+//                    }
+//                }
+//            }
+//        }
+//    };
+
 
     public String buildUrlString(String url) {
         if (url.isEmpty()) {
